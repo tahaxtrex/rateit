@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 interface HeaderProps {
     currentRoute: string;
-    onNavigate: (route: 'home' | 'ask' | 'reviews' | 'add-school') => void;
+    onNavigate: (route: 'home' | 'ask' | 'reviews' | 'add-school' | 'dashboard' | 'compare') => void;
 }
 
 const Header: React.FC<HeaderProps> = ({ currentRoute, onNavigate }) => {
@@ -10,6 +10,8 @@ const Header: React.FC<HeaderProps> = ({ currentRoute, onNavigate }) => {
 
     const navItems = [
         { id: 'home', label: 'Home' },
+        { id: 'dashboard', label: 'Rankings' },
+        { id: 'compare', label: 'Compare' },
         { id: 'ask', label: 'Ask AI' },
         { id: 'reviews', label: 'Reviews' },
         { id: 'add-school', label: 'Add School' },

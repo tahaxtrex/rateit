@@ -5,8 +5,10 @@ import Ask from './pages/Ask';
 import Reviews from './pages/Reviews';
 import AddSchool from './pages/AddSchool';
 import UniversityProfile from './pages/UniversityProfile';
+import Dashboard from './pages/Dashboard';
+import CompareSchools from './pages/CompareSchools';
 
-type Route = 'home' | 'ask' | 'reviews' | 'add-school' | 'university';
+type Route = 'home' | 'ask' | 'reviews' | 'add-school' | 'university' | 'dashboard' | 'compare';
 
 const App: React.FC = () => {
     const [route, setRoute] = useState<Route>('home');
@@ -28,6 +30,8 @@ const App: React.FC = () => {
                 {route === 'ask' && <Ask />}
                 {route === 'reviews' && <Reviews onNavigate={navigate} />}
                 {route === 'add-school' && <AddSchool onNavigate={navigate} />}
+                {route === 'dashboard' && <Dashboard onNavigate={navigate} />}
+                {route === 'compare' && <CompareSchools onNavigate={navigate} />}
                 {route === 'university' && selectedUniversityId && (
                     <UniversityProfile
                         universityId={selectedUniversityId}

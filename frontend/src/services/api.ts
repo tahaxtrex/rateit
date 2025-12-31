@@ -77,3 +77,21 @@ export const sendAIChat = async (query: string, universityId?: string) => {
     if (!res.ok) throw new Error('Failed to get AI response');
     return res.json();
 };
+
+// Rankings (Dashboard)
+export const fetchRankings = async () => {
+    const res = await fetch(`${API_BASE}/rankings`);
+    if (!res.ok) throw new Error('Failed to fetch rankings');
+    return res.json();
+};
+
+// Compare Schools
+export const compareSchools = async (universityId1: string, universityId2: string) => {
+    const res = await fetch(`${API_BASE}/ai/compare`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ universityId1, universityId2 }),
+    });
+    if (!res.ok) throw new Error('Failed to compare schools');
+    return res.json();
+};
