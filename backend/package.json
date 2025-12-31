@@ -1,0 +1,18 @@
+{
+    "name": "rateit-backend",
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "node server.js",
+        "db:init": "psql -f database/schema.sql"
+    },
+    "dependencies": {
+        "@google/generative-ai": "^0.21.0",
+        "cors": "^2.8.5",
+        "dotenv": "^16.3.1",
+        "express": "^4.18.2",
+        "nodemon": "^3.1.11",
+        "pg": "^8.11.3"
+    }
+}
