@@ -396,3 +396,75 @@ export const hashQuery = (text) => {
     }
     return Math.abs(hash).toString(16);
 };
+
+// ============================================
+// RANKINGS
+// ============================================
+
+/**
+ * Get university rankings grouped by country
+ * Each country contains universities sorted by average rating (descending)
+ */
+export const getRankings = async () => {
+    const result = await query(`
+    SELECT 
+      u.id,
+      u.name,
+      u.image_url,
+      l.name as location,
+      c.name as country,
+      COALESCE(s.total_reviews, 0) as review_count,
+      COALESCE(s.average_rating, 0) as avg_rating,
+      COALESCE(s.academics_avg, 0) as academics_avg,
+      COALESCE(s.dorms_avg, 0) as dorms_avg,
+      COALESCE(s.food_avg, 0) as food_avg,
+      COALESCE(s.social_avg, 0) as social_avg,
+      COALESCE(s.admin_avg, 0) as admin_avg,
+      COALESCE(s.cost_avg, 0) as cost_avg,
+      COALESCE(s.safety_avg, 0) as safety_avg,
+      COALESCE(s.career_avg, 0) as career_avg
+    FROM universities u
+    LEFT JOIN locations l ON u.location_id = l.id
+    LEFT JOIN countries c ON l.country_id = c.id
+    LEFT JOIN university_stats s ON u.id = s.university_id
+    WHERE c.name IS NOT NULL
+    ORDER BY c.name ASC, s.average_rating DESC NULLS LAST, u.name ASC
+  `);
+
+    // Group by country
+    const countryMap = new Map();
+
+    for (const row of result.rows) {
+        const country = row.country;
+        if (!countryMap.has(country)) {
+            countryMap.set(country, []);
+        }
+
+        countryMap.get(country).push({
+            id: row.id,
+            name: row.name,
+            imageUrl: row.image_url,
+            location: row.location,
+            reviewCount: parseInt(row.review_count),
+            avgRating: parseFloat(row.avg_rating) || 0,
+            categories: {
+                academics: parseFloat(row.academics_avg) || 0,
+                dorms: parseFloat(row.dorms_avg) || 0,
+                food: parseFloat(row.food_avg) || 0,
+                social: parseFloat(row.social_avg) || 0,
+                admin: parseFloat(row.admin_avg) || 0,
+                cost: parseFloat(row.cost_avg) || 0,
+                safety: parseFloat(row.safety_avg) || 0,
+                career: parseFloat(row.career_avg) || 0,
+            },
+        });
+    }
+
+    // Convert to array of country rankings
+    const rankings = [];
+    for (const [country, universities] of countryMap) {
+        rankings.push({ country, universities });
+    }
+
+    return rankings;
+};

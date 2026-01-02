@@ -17,7 +17,7 @@ build
 Dockerfile*
 docker-compose*
 .dockerignore
-nginx.conf
+
 
 # IDE
 .vscode

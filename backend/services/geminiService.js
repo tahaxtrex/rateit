@@ -176,6 +176,9 @@ STYLE GUIDE:
 - Use emojis sparingly but naturally 🎓
 - If info is limited, say "I haven't heard much about that" not "we don't have data"
 - Keep it concise and conversational
+- Keep your responses SHORT (2-4 sentences max)
+- NEVER use markdown formatting like **bold**, *italic*, bullet points, or numbered lists - write in plain conversational text only
+- Answer the question directly without listing everything you know
 
 WHAT STUDENTS HAVE SHARED:
 ${statsSummary}
@@ -186,7 +189,7 @@ ${qualitativeSamples}
 QUESTION:
 "${query}"
 
-Respond like you're a helpful friend who knows the campus well:`;
+Respond like you're a helpful friend who knows the campus well. Keep it brief and focused:`;
 
         const result = await model.generateContent(prompt);
         const response = await result.response;
@@ -230,9 +233,17 @@ STYLE GUIDE:
 - NEVER use technical phrases like "based on data", "in our database", "according to our records"
 - Be casual and warm ("honestly", "tbh", "from what I gather")
 - Use emojis naturally 🌍🎓
-- If you haven't heard about something, say "I haven't heard much about that yet" not "we don't have data"
+- If you haven't heard about something, just DON'T MENTION IT AT ALL - skip schools you don't have info on
 - Compare schools by what students actually feel, not by numbers
-- answer the user in the same language they ask in
+- Answer the user in the same language they ask in
+
+CRITICAL RULES:
+- When asked for recommendations, give ONLY 2-3 of the BEST options you actually have info about
+- DO NOT list all universities - be selective and focused
+- NEVER mention a school just to say you don't have info on it - that's annoying and unhelpful
+- Keep responses SHORT (3-5 sentences max)
+- NEVER use markdown formatting like **bold**, *italic*, bullet points (-), or numbered lists (1. 2. 3.) - write in plain conversational text only
+- Answer directly without trying to be exhaustive
 
 SCHOOLS I KNOW ABOUT:
 ${universityContext}
@@ -243,7 +254,7 @@ ${reviewSamples}
 QUESTION:
 "${query}"
 
-Answer like a helpful friend who knows these schools:`;
+Answer like a helpful friend who knows these schools. Be brief, focused, and only mention schools you actually have good info on:`;
 
         const result = await model.generateContent(prompt);
         const response = await result.response;

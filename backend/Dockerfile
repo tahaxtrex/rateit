@@ -33,8 +33,19 @@ COPY --chown=nodejs:nodejs . .
 RUN rm -rf .env.example .git* *.md init-db.js
 
 # Set environment variables
+# NOTE: Sensitive values (DB_PASSWORD, GEMINI_API_KEY) should be passed at runtime
+# via docker-compose.yml or docker run -e, NOT hardcoded here
 ENV NODE_ENV=production
 ENV PORT=3001
+ENV DB_HOST=""
+ENV DB_PORT=5432
+ENV DB_NAME=""
+ENV DB_USER=""
+ENV DB_PASSWORD=""
+ENV DB_SSL=true
+ENV DB_POOL_MAX=20
+ENV DB_POOL_IDLE_TIMEOUT=30000
+ENV GEMINI_API_KEY=""
 
 # Switch to non-root user
 USER nodejs
