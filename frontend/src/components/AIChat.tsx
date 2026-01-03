@@ -105,25 +105,28 @@ const AIChat: React.FC<AIChatProps> = ({
         onUniversityChange?.(newId);
     };
 
-    const containerHeight = fullPage ? 'calc(100vh - 200px)' : '500px';
+    const containerHeight = fullPage ? 'calc(100vh - 180px)' : '500px';
+    const mobileContainerHeight = fullPage ? 'calc(100dvh - 140px)' : '450px';
 
     // Determine if input should be enabled
     const inputEnabled = globalMode || !!uniId;
 
     return (
-        <div className="glass-card" style={{
+        <div className="glass-card ai-chat-container" style={{
             display: 'flex',
             flexDirection: 'column',
             height: containerHeight,
+            minHeight: '350px',
             overflow: 'hidden',
         }}>
             {/* Header */}
-            <div style={{
+            <div className="ai-chat-header" style={{
                 padding: '16px 20px',
                 background: 'linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                flexShrink: 0,
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <div style={{
@@ -149,7 +152,7 @@ const AIChat: React.FC<AIChatProps> = ({
 
             {/* University Selector (only if not global mode and universities provided) */}
             {!globalMode && universities.length > 0 && (
-                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--glass-border)' }}>
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--glass-border)', flexShrink: 0 }}>
                     <select
                         value={uniId}
                         onChange={(e) => handleUniChange(e.target.value)}
@@ -167,6 +170,7 @@ const AIChat: React.FC<AIChatProps> = ({
             {/* Messages */}
             <div
                 ref={scrollRef}
+                className="ai-chat-messages"
                 style={{
                     flex: 1,
                     overflowY: 'auto',
@@ -174,6 +178,7 @@ const AIChat: React.FC<AIChatProps> = ({
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '12px',
+                    minHeight: 0,
                 }}
             >
                 {!globalMode && !uniId && (
@@ -196,6 +201,7 @@ const AIChat: React.FC<AIChatProps> = ({
                         }}
                     >
                         <div
+                            className="ai-chat-message"
                             style={{
                                 maxWidth: '85%',
                                 padding: '12px 16px',
@@ -212,6 +218,7 @@ const AIChat: React.FC<AIChatProps> = ({
                                     : '1px solid var(--glass-border)',
                                 fontSize: '0.9rem',
                                 lineHeight: 1.5,
+                                wordBreak: 'break-word',
                             }}
                         >
                             {msg.role === 'assistant' && !msg.isError && (
@@ -259,22 +266,24 @@ const AIChat: React.FC<AIChatProps> = ({
             </div>
 
             {/* Disclaimer */}
-            <div style={{
+            <div className="ai-chat-disclaimer" style={{
                 padding: '8px 16px',
                 background: 'rgba(0,0,0,0.2)',
                 fontSize: '0.65rem',
                 color: 'var(--text-muted)',
                 textAlign: 'center',
+                flexShrink: 0,
             }}>
                 AI-generated summaries based on anonymous student submissions. Verify independently.
             </div>
 
             {/* Input */}
-            <div style={{
+            <div className="ai-chat-input-container" style={{
                 padding: '12px 16px',
                 borderTop: '1px solid var(--glass-border)',
                 display: 'flex',
                 gap: '10px',
+                flexShrink: 0,
             }}>
                 <input
                     type="text"
@@ -283,20 +292,32 @@ const AIChat: React.FC<AIChatProps> = ({
                     onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                     placeholder={
                         globalMode
-                            ? "Ask about any university... (e.g., 'Best food in Morocco?')"
+                            ? "Ask about any university..."
                             : uniId
                                 ? "Ask about food, safety, dorms..."
                                 : "Select a university first..."
                     }
                     disabled={!inputEnabled || isThinking}
-                    className="glass-input"
-                    style={{ flex: 1, padding: '12px 16px' }}
+                    className="glass-input ai-chat-input"
+                    style={{
+                        flex: 1,
+                        padding: '14px 16px',
+                        fontSize: '16px',
+                        minHeight: '48px',
+                    }}
                 />
                 <button
                     onClick={handleSend}
                     disabled={!query.trim() || isThinking || !inputEnabled}
-                    className="btn-primary"
-                    style={{ padding: '12px 20px' }}
+                    className="btn-primary ai-chat-send-btn"
+                    style={{
+                        padding: '14px 20px',
+                        minWidth: '50px',
+                        minHeight: '48px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                    }}
                 >
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M22 2L11 13" />
@@ -313,6 +334,11 @@ const AIChat: React.FC<AIChatProps> = ({
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
+        }
+        @media (max-width: 480px) {
+          .ai-chat-container {
+            height: ${mobileContainerHeight} !important;
+          }
         }
       `}</style>
         </div>

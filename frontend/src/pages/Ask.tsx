@@ -24,23 +24,29 @@ const Ask: React.FC = () => {
     return (
         <div style={{ minHeight: 'calc(100vh - 72px)' }}>
             {/* Header */}
-            <section style={{ padding: '40px 0 20px', textAlign: 'center' }}>
+            <section style={{ padding: '24px 0 16px', textAlign: 'center' }}>
                 <div className="container">
-                    <h1 className="heading-lg" style={{ marginBottom: '12px' }}>
+                    <h1 className="heading-lg" style={{ marginBottom: '8px' }}>
                         <span className="text-gradient">Ask AI</span> About Universities
                     </h1>
-                    <p style={{ color: 'var(--text-secondary)', maxWidth: '600px', margin: '0 auto' }}>
-                        Ask questions about any university in our database. Compare schools, find the best options for you, or deep dive into a specific campus. Our AI analyzes real student reviews to give you honest answers.
+                    <p style={{
+                        color: 'var(--text-secondary)',
+                        maxWidth: '600px',
+                        margin: '0 auto',
+                        fontSize: '0.9rem',
+                        padding: '0 16px',
+                    }}>
+                        Ask questions about any university. Our AI analyzes real student reviews.
                     </p>
                 </div>
             </section>
 
             {/* Chat Section - Global Mode */}
-            <section className="container" style={{ paddingBottom: '40px' }}>
+            <section className="container" style={{ paddingBottom: '20px' }}>
                 <div style={{ maxWidth: '800px', margin: '0 auto' }}>
                     {loading ? (
                         <div className="glass-card" style={{
-                            height: '500px',
+                            height: '400px',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -57,45 +63,43 @@ const Ask: React.FC = () => {
                 </div>
             </section>
 
-            {/* Example Questions */}
-            <section className="container" style={{ paddingBottom: '60px' }}>
+            {/* Example Questions - Hidden on very small screens to save space */}
+            <section className="container tips-section-wrapper" style={{ paddingBottom: '40px' }}>
                 <div style={{
                     maxWidth: '800px',
                     margin: '0 auto',
                 }}>
-                    <div className="glass-card" style={{ padding: '24px' }}>
+                    <div className="glass-card tips-section" style={{ padding: '20px' }}>
                         <h3 style={{
-                            fontSize: '1rem',
+                            fontSize: '0.95rem',
                             fontWeight: 600,
                             color: 'var(--accent-secondary)',
-                            marginBottom: '16px',
+                            marginBottom: '12px',
                         }}>
                             💡 Try asking...
                         </h3>
                         <div style={{
                             display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-                            gap: '12px',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                            gap: '10px',
                         }}>
                             {[
-                                { icon: '🏆', text: 'Which university has the best food in Morocco?' },
-                                { icon: '🔒', text: 'What schools are safest for women?' },
-                                { icon: '💰', text: 'Compare cost of living at universities in Kenya' },
-                                { icon: '🎓', text: 'Which school has the best academics?' },
-                                { icon: '🏠', text: 'Tell me about dorms at Al Akhawayn' },
-                                { icon: '🌍', text: 'Best universities in Central Asia?' },
+                                { icon: '🏆', text: 'Best food in Morocco?' },
+                                { icon: '🔒', text: 'Safest schools for women?' },
+                                { icon: '💰', text: 'Cheapest universities?' },
+                                { icon: '🎓', text: 'Best academics?' },
                             ].map((tip, i) => (
-                                <div key={i} style={{
+                                <div key={i} className="tip-item" style={{
                                     display: 'flex',
                                     alignItems: 'center',
-                                    gap: '12px',
+                                    gap: '10px',
                                     fontSize: '0.85rem',
                                     color: 'var(--text-secondary)',
                                     padding: '8px 12px',
                                     background: 'rgba(108, 92, 231, 0.1)',
                                     borderRadius: '8px',
                                 }}>
-                                    <span style={{ fontSize: '1.2rem' }}>{tip.icon}</span>
+                                    <span style={{ fontSize: '1.1rem' }}>{tip.icon}</span>
                                     {tip.text}
                                 </div>
                             ))}
