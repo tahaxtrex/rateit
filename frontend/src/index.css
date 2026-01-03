@@ -531,9 +531,12 @@ body {
 
   /* Chat send button */
   .ai-chat-send-btn {
-    min-width: 50px !important;
-    min-height: 50px !important;
-    padding: 12px !important;
+    width: 48px !important;
+    min-width: 48px !important;
+    max-width: 48px !important;
+    height: 48px !important;
+    min-height: 48px !important;
+    padding: 0 !important;
   }
 
   /* Input container at bottom */

@@ -301,7 +301,7 @@ const AIChat: React.FC<AIChatProps> = ({
                     className="glass-input ai-chat-input"
                     style={{
                         flex: 1,
-                        padding: '14px 16px',
+                        padding: '12px 16px',
                         fontSize: '16px',
                         minHeight: '48px',
                     }}
@@ -311,12 +311,16 @@ const AIChat: React.FC<AIChatProps> = ({
                     disabled={!query.trim() || isThinking || !inputEnabled}
                     className="btn-primary ai-chat-send-btn"
                     style={{
-                        padding: '14px 20px',
-                        minWidth: '50px',
+                        padding: '0',
+                        width: '48px',
+                        minWidth: '48px',
+                        maxWidth: '48px',
+                        height: '48px',
                         minHeight: '48px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
+                        flexShrink: 0,
                     }}
                 >
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
