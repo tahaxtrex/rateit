@@ -619,40 +619,71 @@ export const preRankUniversities = async (queryText, region = null) => {
         .split(/\s+/)
         .filter(w => w.length > 2);
 
-    // Build query with optional region filter and keyword matching
-    let sql = `
-    SELECT 
-      u.id,
-      u.name,
-      u.normalized_name,
-      u.description,
-      l.name as location,
-      c.name as country,
-      COALESCE(s.total_reviews, 0) as review_count,
-      COALESCE(s.average_rating, 0) as avg_rating,
-      s.sentiment_summary,
-      (
-        COALESCE(s.average_rating, 0) * 0.4 +
-        LEAST(COALESCE(s.total_reviews, 0) / 10.0, 2) * 0.3 +
-        CASE WHEN $1 IS NOT NULL AND c.name ILIKE $1 THEN 1.5 ELSE 0 END +
-        CASE WHEN u.name ILIKE ANY($2) OR u.description ILIKE ANY($2) THEN 1.0 ELSE 0 END
-      ) as relevance_score
-    FROM universities u
-    LEFT JOIN locations l ON u.location_id = l.id
-    LEFT JOIN countries c ON l.country_id = c.id
-    LEFT JOIN university_stats s ON u.id = s.university_id
-    WHERE COALESCE(s.total_reviews, 0) > 0
-    ORDER BY relevance_score DESC, s.average_rating DESC NULLS LAST
-    LIMIT $3
-  `;
-
     const keywordPatterns = keywords.map(k => `%${k}%`);
+    // Ensure we always have at least one pattern to avoid empty array issues
+    const patterns = keywordPatterns.length > 0 ? keywordPatterns : ['%%'];
 
-    const result = await query(sql, [
-        region ? `%${region}%` : null,
-        keywordPatterns.length > 0 ? keywordPatterns : ['%%'],
-        CONFIG.MAX_CANDIDATES_GLOBAL
-    ]);
+    // Build query with explicit region handling to avoid parameter type inference issues
+    let sql, params;
+
+    if (region) {
+        // Region-specific query
+        sql = `
+        SELECT 
+          u.id,
+          u.name,
+          u.normalized_name,
+          u.description,
+          l.name as location,
+          c.name as country,
+          COALESCE(s.total_reviews, 0) as review_count,
+          COALESCE(s.average_rating, 0) as avg_rating,
+          s.sentiment_summary,
+          (
+            COALESCE(s.average_rating, 0) * 0.4 +
+            LEAST(COALESCE(s.total_reviews, 0) / 10.0, 2) * 0.3 +
+            CASE WHEN c.name ILIKE $1 THEN 1.5 ELSE 0 END +
+            CASE WHEN u.name ILIKE ANY($2::text[]) OR u.description ILIKE ANY($2::text[]) THEN 1.0 ELSE 0 END
+          ) as relevance_score
+        FROM universities u
+        LEFT JOIN locations l ON u.location_id = l.id
+        LEFT JOIN countries c ON l.country_id = c.id
+        LEFT JOIN university_stats s ON u.id = s.university_id
+        WHERE COALESCE(s.total_reviews, 0) > 0
+        ORDER BY relevance_score DESC, s.average_rating DESC NULLS LAST
+        LIMIT $3
+      `;
+        params = [`%${region}%`, patterns, CONFIG.MAX_CANDIDATES_GLOBAL];
+    } else {
+        // Global query (no region filter)
+        sql = `
+        SELECT 
+          u.id,
+          u.name,
+          u.normalized_name,
+          u.description,
+          l.name as location,
+          c.name as country,
+          COALESCE(s.total_reviews, 0) as review_count,
+          COALESCE(s.average_rating, 0) as avg_rating,
+          s.sentiment_summary,
+          (
+            COALESCE(s.average_rating, 0) * 0.4 +
+            LEAST(COALESCE(s.total_reviews, 0) / 10.0, 2) * 0.3 +
+            CASE WHEN u.name ILIKE ANY($1::text[]) OR u.description ILIKE ANY($1::text[]) THEN 1.0 ELSE 0 END
+          ) as relevance_score
+        FROM universities u
+        LEFT JOIN locations l ON u.location_id = l.id
+        LEFT JOIN countries c ON l.country_id = c.id
+        LEFT JOIN university_stats s ON u.id = s.university_id
+        WHERE COALESCE(s.total_reviews, 0) > 0
+        ORDER BY relevance_score DESC, s.average_rating DESC NULLS LAST
+        LIMIT $2
+      `;
+        params = [patterns, CONFIG.MAX_CANDIDATES_GLOBAL];
+    }
+
+    const result = await query(sql, params);
 
     return result.rows.map(row => ({
         id: row.id,

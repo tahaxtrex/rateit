@@ -124,7 +124,7 @@ export const normalizeUniversityInput = async (userInput, skipAI = false) => {
         console.log('[Gemini] Using AI normalization for ambiguous input:', inputName);
 
         const model = ai.getGenerativeModel({
-            model: 'gemini-2.0-flash',
+            model: 'gemini-2.5-flash',
             generationConfig: {
                 maxOutputTokens: CONFIG.NORMALIZE_MAX_TOKENS,
             }
@@ -184,7 +184,7 @@ export const moderateContent = async (text) => {
 
     try {
         const model = ai.getGenerativeModel({
-            model: 'gemini-2.0-flash',
+            model: 'gemini-2.5-flash',
             generationConfig: {
                 maxOutputTokens: 50,
             }
@@ -221,7 +221,7 @@ export const generateInsight = async (query, universityName, stats, sentimentSum
 
     try {
         const model = ai.getGenerativeModel({
-            model: 'gemini-2.0-flash',
+            model: 'gemini-2.5-flash',
             generationConfig: {
                 maxOutputTokens: CONFIG.INSIGHT_MAX_TOKENS,
             }
@@ -269,7 +269,7 @@ export const generateGlobalInsight = async (query, rankedCandidates) => {
 
     try {
         const model = ai.getGenerativeModel({
-            model: 'gemini-2.0-flash',
+            model: 'gemini-2.5-flash',
             generationConfig: {
                 maxOutputTokens: CONFIG.GLOBAL_INSIGHT_MAX_TOKENS,
             }
