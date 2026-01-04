@@ -9,9 +9,9 @@ dotenv.config();
 // ============================================
 const CONFIG = {
     SIMILARITY_THRESHOLD: 0.7,          // Confidence threshold for deterministic matching
-    NORMALIZE_MAX_TOKENS: 100,          // Max output tokens for normalization
-    INSIGHT_MAX_TOKENS: 120,            // Max output tokens for single university insight
-    GLOBAL_INSIGHT_MAX_TOKENS: 180,     // Max output tokens for global insight
+    NORMALIZE_MAX_TOKENS: 150,          // Max output tokens for normalization
+    INSIGHT_MAX_TOKENS: 300,            // Max output tokens for single university insight
+    GLOBAL_INSIGHT_MAX_TOKENS: 400,     // Max output tokens for global insight
     AMBIGUOUS_LENGTH_THRESHOLD: 5,      // Strings <= this length are considered ambiguous
 };
 
@@ -126,7 +126,7 @@ export const normalizeUniversityInput = async (userInput, skipAI = false) => {
         const model = ai.getGenerativeModel({
             model: 'gemini-2.5-flash',
             generationConfig: {
-                maxOutputTokens: CONFIG.NORMALIZE_MAX_TOKENS,
+                maxOutputTokens: 1000,
             }
         });
 
@@ -186,7 +186,7 @@ export const moderateContent = async (text) => {
         const model = ai.getGenerativeModel({
             model: 'gemini-2.5-flash',
             generationConfig: {
-                maxOutputTokens: 50,
+                maxOutputTokens: 256,
             }
         });
 
@@ -223,7 +223,7 @@ export const generateInsight = async (query, universityName, stats, sentimentSum
         const model = ai.getGenerativeModel({
             model: 'gemini-2.5-flash',
             generationConfig: {
-                maxOutputTokens: CONFIG.INSIGHT_MAX_TOKENS,
+                maxOutputTokens: 1024,
             }
         });
 
@@ -264,6 +264,7 @@ Reply in 2-3 sentences, casual tone, no markdown/bullets, use emojis sparingly 
 export const generateGlobalInsight = async (query, rankedCandidates) => {
     const ai = getGenAI();
     if (!ai) {
+        console.error('[Gemini] No AI client available');
         return 'API Key missing. Cannot generate insight.';
     }
 
@@ -271,7 +272,7 @@ export const generateGlobalInsight = async (query, rankedCandidates) => {
         const model = ai.getGenerativeModel({
             model: 'gemini-2.5-flash',
             generationConfig: {
-                maxOutputTokens: CONFIG.GLOBAL_INSIGHT_MAX_TOKENS,
+                maxOutputTokens: 2048, // High limit to allow complete responses
             }
         });
 
@@ -294,11 +295,51 @@ Q: "${query}"
 
 Reply in 3-4 sentences, compare only 2-3 best options, casual tone, no markdown/bullets üåç`;
 
+        console.log('[Gemini] Sending global insight request to AI...');
         const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text() || "I couldn't generate an insight at this moment.";
+
+        try {
+            const response = await result.response;
+            console.log('[Gemini] Got response object, type:', typeof response);
+
+            // Log full response structure for debugging
+            console.log('[Gemini] Response candidates:', response.candidates?.length || 0);
+            console.log('[Gemini] Finish reason:', response.candidates?.[0]?.finishReason);
+
+            // Check for safety blocks
+            if (response.candidates?.[0]?.finishReason === 'SAFETY') {
+                console.error('[Gemini] Response blocked by safety filters');
+                console.error('[Gemini] Safety ratings:', JSON.stringify(response.candidates[0].safetyRatings, null, 2));
+                return "I couldn't generate a response. Please try rephrasing your question.";
+            }
+
+            // Check if content exists
+            if (!response.candidates || response.candidates.length === 0) {
+                console.error('[Gemini] No candidates in response');
+                return "I couldn't generate an insight at this moment.";
+            }
+
+            const text = response.text();
+            console.log('[Gemini] Received response:', text ? `${text.length} chars` : 'empty');
+            console.log('[Gemini] Full response text:', text);
+
+            if (!text || text.trim().length === 0) {
+                console.error('[Gemini] Empty response received from AI');
+                return "I couldn't generate an insight at this moment.";
+            }
+
+            return text;
+        } catch (parseError) {
+            console.error('[Gemini] Error parsing response:', parseError.message);
+            console.error('[Gemini] Parse error stack:', parseError.stack);
+            throw parseError; // Re-throw to be caught by outer catch
+        }
     } catch (error) {
         console.error('[Gemini] Global chat error:', error.message);
+        console.error('[Gemini] Error stack:', error.stack);
+        if (error.response) {
+            console.error('[Gemini] Error response:', JSON.stringify(error.response, null, 2));
+        }
         return "Sorry, I'm having trouble right now. Try again later.";
     }
 };
