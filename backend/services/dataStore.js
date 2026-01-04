@@ -2,7 +2,16 @@
 // Connects to PostgreSQL (AWS RDS) and handles all data operations
 
 import { query, getClient } from './database.js';
-import { normalizeUniversityInput, basicNormalize } from './geminiService.js';
+import { normalizeUniversityInput, basicNormalize, isAmbiguousInput } from './geminiService.js';
+
+// ============================================
+// CONFIGURATION
+// ============================================
+const CONFIG = {
+    SIMILARITY_THRESHOLD: 0.7,           // High confidence match threshold
+    SIMILARITY_THRESHOLD_LOW: 0.4,       // Low confidence threshold (needs AI)
+    MAX_CANDIDATES_GLOBAL: 5,            // Max candidates for global insight
+};
 
 // ============================================
 // CATEGORIES
@@ -43,7 +52,8 @@ export const getUniversities = async () => {
       l.name as location,
       c.name as country,
       COALESCE(s.total_reviews, 0) as review_count,
-      COALESCE(s.average_rating, 0) as avg_rating
+      COALESCE(s.average_rating, 0) as avg_rating,
+      s.sentiment_summary
     FROM universities u
     LEFT JOIN locations l ON u.location_id = l.id
     LEFT JOIN countries c ON l.country_id = c.id
@@ -62,6 +72,7 @@ export const getUniversities = async () => {
         country: row.country,
         reviewCount: parseInt(row.review_count),
         avgRating: parseFloat(row.avg_rating) || 0,
+        sentimentSummary: row.sentiment_summary,
     }));
 };
 
@@ -115,79 +126,210 @@ export const getUniversityById = async (id) => {
                 [Category.SAFETY]: { count: row.safety_count || 0, average: parseFloat(row.safety_avg) || 0 },
                 [Category.CAREER]: { count: row.career_count || 0, average: parseFloat(row.career_avg) || 0 },
             },
+            sentimentSummary: row.sentiment_summary,
         },
     };
 };
 
 /**
- * Find a university by normalized name (for deduplication)
- * Uses AI normalization to find similar universities
+ * Find similar universities with confidence score
+ * Returns matches above the threshold with similarity scores
+ */
+export const findSimilarWithConfidence = async (normalizedName, threshold = CONFIG.SIMILARITY_THRESHOLD) => {
+    const result = await query(`
+    SELECT id, name, normalized_name, 
+           similarity(normalized_name, $1) as sim_score
+    FROM universities
+    WHERE similarity(normalized_name, $1) > $2
+    ORDER BY sim_score DESC
+    LIMIT 5
+  `, [normalizedName, threshold]);
+
+    return result.rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        normalizedName: row.normalized_name,
+        similarity: parseFloat(row.sim_score),
+    }));
+};
+
+/**
+ * Find a university by normalized name (legacy - uses new two-phase approach)
  */
 export const findUniversityByName = async (name) => {
     const normalizedName = basicNormalize(name);
 
-    // First, try exact normalized match
-    const exactMatch = await query(`
-    SELECT id, name, normalized_name
-    FROM universities
-    WHERE normalized_name = $1
-  `, [normalizedName]);
-
-    if (exactMatch.rows.length > 0) {
-        return exactMatch.rows[0];
+    // Phase 1: Try high-confidence match first
+    const highConfidence = await findSimilarWithConfidence(normalizedName, CONFIG.SIMILARITY_THRESHOLD);
+    if (highConfidence.length > 0 && highConfidence[0].similarity >= CONFIG.SIMILARITY_THRESHOLD) {
+        console.log(`[DataStore] High-confidence match found: ${highConfidence[0].name} (${highConfidence[0].similarity})`);
+        return highConfidence[0];
     }
 
-    // Try fuzzy match using trigram similarity
-    const fuzzyMatch = await query(`
-    SELECT id, name, normalized_name, 
-           similarity(normalized_name, $1) as sim_score
-    FROM universities
-    WHERE similarity(normalized_name, $1) > 0.4
-    ORDER BY sim_score DESC
-    LIMIT 1
-  `, [normalizedName]);
-
-    if (fuzzyMatch.rows.length > 0) {
-        return fuzzyMatch.rows[0];
+    // Phase 2: Try low-confidence match
+    const lowConfidence = await findSimilarWithConfidence(normalizedName, CONFIG.SIMILARITY_THRESHOLD_LOW);
+    if (lowConfidence.length > 0) {
+        console.log(`[DataStore] Low-confidence match found: ${lowConfidence[0].name} (${lowConfidence[0].similarity})`);
+        return lowConfidence[0];
     }
 
     // Check aliases
     const aliasMatch = await query(`
-    SELECT u.id, u.name, u.normalized_name
+    SELECT u.id, u.name, u.normalized_name,
+           similarity(a.normalized_alias, $1) as sim_score
     FROM university_aliases a
     JOIN universities u ON a.university_id = u.id
-    WHERE similarity(a.normalized_alias, $1) > 0.4
-    ORDER BY similarity(a.normalized_alias, $1) DESC
+    WHERE similarity(a.normalized_alias, $1) > $2
+    ORDER BY sim_score DESC
     LIMIT 1
-  `, [normalizedName]);
+  `, [normalizedName, CONFIG.SIMILARITY_THRESHOLD_LOW]);
 
     if (aliasMatch.rows.length > 0) {
+        console.log(`[DataStore] Alias match found: ${aliasMatch.rows[0].name}`);
         return aliasMatch.rows[0];
     }
 
     return null;
 };
 
+// ============================================
+// AI NORMALIZATION CACHE
+// ============================================
+
+/**
+ * Get cached AI normalization result
+ */
+export const getAINormalizationCache = async (inputHash) => {
+    try {
+        const result = await query(`
+      SELECT normalized_name, display_name, location, country
+      FROM ai_normalization_cache
+      WHERE input_hash = $1 AND expires_at > NOW()
+      LIMIT 1
+    `, [inputHash]);
+
+        return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error) {
+        // Table might not exist yet
+        console.warn('[DataStore] AI normalization cache lookup failed:', error.message);
+        return null;
+    }
+};
+
+/**
+ * Cache AI normalization result
+ */
+export const setAINormalizationCache = async (inputHash, inputText, normalized) => {
+    try {
+        await query(`
+      INSERT INTO ai_normalization_cache (input_hash, input_text, normalized_name, display_name, location, country)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (input_hash) DO UPDATE SET
+        normalized_name = EXCLUDED.normalized_name,
+        display_name = EXCLUDED.display_name,
+        expires_at = NOW() + INTERVAL '7 days'
+    `, [inputHash, inputText, normalized.normalizedName, normalized.name, normalized.location, normalized.country]);
+    } catch (error) {
+        console.warn('[DataStore] AI normalization cache write failed:', error.message);
+    }
+};
+
 /**
  * Add a new university or return existing one if duplicate
- * Uses AI to normalize the name and detect duplicates
+ * Uses two-phase resolution: deterministic first, AI only for ambiguous inputs
  */
 export const addUniversity = async (data) => {
-    // Use AI to normalize the input
-    const normalized = await normalizeUniversityInput(data);
+    const inputName = data.name;
+    const deterministicNorm = basicNormalize(inputName);
 
-    // Check if university already exists
-    const existing = await findUniversityByName(normalized.name);
-    if (existing) {
-        // Add the input name as an alias for better future matching
-        await query(`
-      INSERT INTO university_aliases (university_id, alias_name, normalized_alias)
-      VALUES ($1, $2, $3)
-      ON CONFLICT DO NOTHING
-    `, [existing.id, data.name, basicNormalize(data.name)]);
+    // ============================================
+    // PHASE 1: Deterministic matching (no AI)
+    // ============================================
+    console.log(`[DataStore] Phase 1: Deterministic matching for "${inputName}" -> "${deterministicNorm}"`);
 
-        return { ...existing, isExisting: true };
+    // Check for high-confidence match
+    const highConfidence = await findSimilarWithConfidence(deterministicNorm, CONFIG.SIMILARITY_THRESHOLD);
+    if (highConfidence.length > 0 && highConfidence[0].similarity >= CONFIG.SIMILARITY_THRESHOLD) {
+        console.log(`[DataStore] High-confidence match found, skipping AI: ${highConfidence[0].name}`);
+
+        // Add alias for future matching
+        await addAlias(highConfidence[0].id, inputName, deterministicNorm);
+
+        return { ...highConfidence[0], isExisting: true };
     }
+
+    // ============================================
+    // PHASE 2: AI resolution (only for ambiguous inputs)
+    // ============================================
+    const needsAI = isAmbiguousInput(inputName);
+    let normalized;
+
+    if (needsAI) {
+        console.log(`[DataStore] Phase 2: Input is ambiguous, using AI normalization`);
+
+        // Check AI cache first
+        const inputHash = hashQuery(inputName.toLowerCase().trim());
+        const cached = await getAINormalizationCache(inputHash);
+
+        if (cached) {
+            console.log(`[DataStore] Using cached AI normalization result`);
+            normalized = {
+                normalizedName: cached.normalized_name,
+                name: cached.display_name || inputName,
+                location: cached.location || data.location,
+                country: cached.country || data.country,
+                description: data.description,
+                usedAI: true,
+            };
+        } else {
+            // Call AI
+            normalized = await normalizeUniversityInput(data);
+
+            // Cache the result
+            if (normalized.usedAI) {
+                await setAINormalizationCache(inputHash, inputName, normalized);
+            }
+        }
+
+        // After AI resolution, do SECOND similarity lookup
+        console.log(`[DataStore] Phase 2b: Second similarity lookup after AI: "${normalized.normalizedName}"`);
+        const postAIMatch = await findSimilarWithConfidence(normalized.normalizedName, CONFIG.SIMILARITY_THRESHOLD_LOW);
+
+        if (postAIMatch.length > 0) {
+            console.log(`[DataStore] Match found after AI resolution: ${postAIMatch[0].name}`);
+
+            // Add both original and AI-normalized as aliases
+            await addAlias(postAIMatch[0].id, inputName, deterministicNorm);
+            if (normalized.normalizedName !== deterministicNorm) {
+                await addAlias(postAIMatch[0].id, normalized.name, normalized.normalizedName);
+            }
+
+            return { ...postAIMatch[0], isExisting: true };
+        }
+    } else {
+        console.log(`[DataStore] Input is not ambiguous, skipping AI`);
+        normalized = {
+            normalizedName: deterministicNorm,
+            name: inputName,
+            location: data.location,
+            country: data.country,
+            description: data.description,
+            usedAI: false,
+        };
+
+        // Check low-confidence matches before creating new
+        const lowConfidence = await findSimilarWithConfidence(deterministicNorm, CONFIG.SIMILARITY_THRESHOLD_LOW);
+        if (lowConfidence.length > 0) {
+            console.log(`[DataStore] Low-confidence match found: ${lowConfidence[0].name}`);
+            await addAlias(lowConfidence[0].id, inputName, deterministicNorm);
+            return { ...lowConfidence[0], isExisting: true };
+        }
+    }
+
+    // ============================================
+    // PHASE 3: Create new university (no match found)
+    // ============================================
+    console.log(`[DataStore] Phase 3: Creating new university: "${normalized.name}"`);
 
     const client = await getClient();
     try {
@@ -195,25 +337,25 @@ export const addUniversity = async (data) => {
 
         // Get or create country
         let countryId = null;
-        if (normalized.country) {
+        if (normalized.country || data.country) {
             const countryResult = await client.query(`
         INSERT INTO countries (name)
         VALUES ($1)
         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
         RETURNING id
-      `, [normalized.country]);
+      `, [normalized.country || data.country]);
             countryId = countryResult.rows[0].id;
         }
 
         // Get or create location
         let locationId = null;
-        if (normalized.location && countryId) {
+        if ((normalized.location || data.location) && countryId) {
             const locationResult = await client.query(`
         INSERT INTO locations (name, country_id)
         VALUES ($1, $2)
         ON CONFLICT (name, country_id) DO UPDATE SET name = EXCLUDED.name
         RETURNING id
-      `, [normalized.location, countryId]);
+      `, [normalized.location || data.location, countryId]);
             locationId = locationResult.rows[0].id;
         }
 
@@ -251,6 +393,21 @@ export const addUniversity = async (data) => {
         throw error;
     } finally {
         client.release();
+    }
+};
+
+/**
+ * Add an alias for a university
+ */
+const addAlias = async (universityId, aliasName, normalizedAlias) => {
+    try {
+        await query(`
+      INSERT INTO university_aliases (university_id, alias_name, normalized_alias)
+      VALUES ($1, $2, $3)
+      ON CONFLICT DO NOTHING
+    `, [universityId, aliasName, normalizedAlias]);
+    } catch (error) {
+        console.warn('[DataStore] Failed to add alias:', error.message);
     }
 };
 
@@ -347,9 +504,23 @@ export const getAggregatedStats = async (universityId) => {
             totalReviews: 0,
             averageRating: 0,
             categoryBreakdown: {},
+            sentimentSummary: null,
         };
     }
     return uniData.stats;
+};
+
+/**
+ * Get sentiment summary for a university
+ */
+export const getSentimentSummary = async (universityId) => {
+    const result = await query(`
+    SELECT sentiment_summary
+    FROM university_stats
+    WHERE university_id = $1
+  `, [universityId]);
+
+    return result.rows.length > 0 ? result.rows[0].sentiment_summary : null;
 };
 
 // ============================================
@@ -384,6 +555,42 @@ export const cacheResponse = async (universityId, queryHash, queryText, response
 };
 
 /**
+ * Get cached global chat response
+ */
+export const getCachedGlobalResponse = async (queryHash, region = null) => {
+    try {
+        const result = await query(`
+      SELECT response_text
+      FROM global_chat_cache
+      WHERE query_hash = $1 AND (region = $2 OR (region IS NULL AND $2 IS NULL)) AND expires_at > NOW()
+      LIMIT 1
+    `, [queryHash, region]);
+
+        return result.rows.length > 0 ? result.rows[0].response_text : null;
+    } catch (error) {
+        console.warn('[DataStore] Global cache lookup failed:', error.message);
+        return null;
+    }
+};
+
+/**
+ * Cache a global chat response
+ */
+export const cacheGlobalResponse = async (queryHash, queryText, responseText, region = null) => {
+    try {
+        await query(`
+      INSERT INTO global_chat_cache (query_hash, region, query_text, response_text)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (query_hash, region) 
+      DO UPDATE SET response_text = EXCLUDED.response_text, 
+                    expires_at = NOW() + INTERVAL '24 hours'
+    `, [queryHash, region, queryText, responseText]);
+    } catch (error) {
+        console.warn('[DataStore] Global cache write failed:', error.message);
+    }
+};
+
+/**
  * Create a simple hash for query caching
  */
 export const hashQuery = (text) => {
@@ -398,12 +605,75 @@ export const hashQuery = (text) => {
 };
 
 // ============================================
+// PRE-RANKING FOR GLOBAL INSIGHTS
+// ============================================
+
+/**
+ * Pre-rank universities for global insight queries
+ * Returns top candidates based on relevance, rating, and review count
+ */
+export const preRankUniversities = async (queryText, region = null) => {
+    // Extract potential keywords from query
+    const keywords = queryText.toLowerCase()
+        .replace(/[^\w\s]/g, '')
+        .split(/\s+/)
+        .filter(w => w.length > 2);
+
+    // Build query with optional region filter and keyword matching
+    let sql = `
+    SELECT 
+      u.id,
+      u.name,
+      u.normalized_name,
+      u.description,
+      l.name as location,
+      c.name as country,
+      COALESCE(s.total_reviews, 0) as review_count,
+      COALESCE(s.average_rating, 0) as avg_rating,
+      s.sentiment_summary,
+      (
+        COALESCE(s.average_rating, 0) * 0.4 +
+        LEAST(COALESCE(s.total_reviews, 0) / 10.0, 2) * 0.3 +
+        CASE WHEN $1 IS NOT NULL AND c.name ILIKE $1 THEN 1.5 ELSE 0 END +
+        CASE WHEN u.name ILIKE ANY($2) OR u.description ILIKE ANY($2) THEN 1.0 ELSE 0 END
+      ) as relevance_score
+    FROM universities u
+    LEFT JOIN locations l ON u.location_id = l.id
+    LEFT JOIN countries c ON l.country_id = c.id
+    LEFT JOIN university_stats s ON u.id = s.university_id
+    WHERE COALESCE(s.total_reviews, 0) > 0
+    ORDER BY relevance_score DESC, s.average_rating DESC NULLS LAST
+    LIMIT $3
+  `;
+
+    const keywordPatterns = keywords.map(k => `%${k}%`);
+
+    const result = await query(sql, [
+        region ? `%${region}%` : null,
+        keywordPatterns.length > 0 ? keywordPatterns : ['%%'],
+        CONFIG.MAX_CANDIDATES_GLOBAL
+    ]);
+
+    return result.rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        normalizedName: row.normalized_name,
+        description: row.description,
+        location: row.location,
+        country: row.country,
+        reviewCount: parseInt(row.review_count),
+        avgRating: parseFloat(row.avg_rating) || 0,
+        sentimentSummary: row.sentiment_summary,
+        relevanceScore: parseFloat(row.relevance_score) || 0,
+    }));
+};
+
+// ============================================
 // RANKINGS
 // ============================================
 
 /**
  * Get university rankings grouped by country
- * Each country contains universities sorted by average rating (descending)
  */
 export const getRankings = async () => {
     const result = await query(`

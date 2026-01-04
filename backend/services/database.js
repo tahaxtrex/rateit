@@ -26,18 +26,36 @@ pool.on('error', (err) => {
     console.error('❌ Unexpected database error:', err);
 });
 
-// Query helper with automatic connection handling
+// Query helper with automatic connection handling and performance monitoring
 export const query = async (text, params) => {
     const start = Date.now();
     try {
         const result = await pool.query(text, params);
         const duration = Date.now() - start;
+
+        // Log all queries in development
         if (process.env.NODE_ENV !== 'production') {
             console.log(`⚡ Query executed in ${duration}ms`);
         }
+
+        // Log slow queries in production (>100ms)
+        if (process.env.NODE_ENV === 'production' && duration > 100) {
+            const queryPreview = text.substring(0, 100).replace(/\s+/g, ' ');
+            console.warn(`🐌 Slow query (${duration}ms): ${queryPreview}...`);
+        }
+
+        // Log very slow queries everywhere (>500ms)
+        if (duration > 500) {
+            const queryPreview = text.substring(0, 150).replace(/\s+/g, ' ');
+            console.error(`🚨 VERY SLOW QUERY (${duration}ms): ${queryPreview}...`);
+            console.error(`   Params:`, params);
+        }
+
         return result;
     } catch (error) {
         console.error('Database query error:', error);
+        console.error('Query:', text.substring(0, 200));
+        console.error('Params:', params);
         throw error;
     }
 };

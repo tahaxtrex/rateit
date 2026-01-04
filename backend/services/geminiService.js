@@ -4,6 +4,23 @@ import dotenv from 'dotenv';
 // Ensure dotenv is loaded
 dotenv.config();
 
+// ============================================
+// CONFIGURATION
+// ============================================
+const CONFIG = {
+    SIMILARITY_THRESHOLD: 0.7,          // Confidence threshold for deterministic matching
+    NORMALIZE_MAX_TOKENS: 100,          // Max output tokens for normalization
+    INSIGHT_MAX_TOKENS: 120,            // Max output tokens for single university insight
+    GLOBAL_INSIGHT_MAX_TOKENS: 180,     // Max output tokens for global insight
+    AMBIGUOUS_LENGTH_THRESHOLD: 5,      // Strings <= this length are considered ambiguous
+};
+
+// Common acronyms that need AI resolution
+const KNOWN_ACRONYMS = new Set([
+    'aui', 'mit', 'uon', 'wiut', 'aku', 'usiu', 'kemu', 'jkuat', 'emu',
+    'lsu', 'ucla', 'nyu', 'usc', 'ucb', 'unc', 'ut', 'um', 'bu', 'bc'
+]);
+
 // Lazy initialization of AI client
 let genAI = null;
 const getGenAI = () => {
@@ -13,97 +30,146 @@ const getGenAI = () => {
     return genAI;
 };
 
+// ============================================
+// INPUT ANALYSIS UTILITIES
+// ============================================
+
+/**
+ * Detect if input is ambiguous and requires AI resolution
+ * Ambiguous inputs include: acronyms, very short strings, non-ASCII, mixed case initials
+ */
+export const isAmbiguousInput = (input) => {
+    const text = typeof input === 'string' ? input : (input.name || '');
+    const normalized = text.trim().toLowerCase();
+
+    // Empty or too short
+    if (normalized.length <= 2) return true;
+
+    // Known acronym
+    if (KNOWN_ACRONYMS.has(normalized)) return true;
+
+    // All uppercase and short (likely acronym)
+    if (text === text.toUpperCase() && text.length <= CONFIG.AMBIGUOUS_LENGTH_THRESHOLD) return true;
+
+    // Contains non-ASCII (cross-language variant)
+    if (/[^\x00-\x7F]/.test(text)) return true;
+
+    // Looks like an acronym pattern (all caps, periods between letters like "M.I.T.")
+    if (/^[A-Z](\.[A-Z])+\.?$/.test(text.trim())) return true;
+
+    return false;
+};
+
+/**
+ * Basic text normalization (enhanced with more stop words)
+ * This is the deterministic phase - no AI required
+ */
+export const basicNormalize = (text) => {
+    if (!text) return '';
+
+    // Extended stop words for university names
+    const stopWords = [
+        'university', 'college', 'institute', 'school', 'academy',
+        'of', 'the', 'in', 'at', 'for', 'and',
+        'international', 'national', 'state', 'federal', 'public', 'private',
+        'higher', 'education', 'learning', 'studies'
+    ];
+
+    const stopWordPattern = new RegExp(`\\b(${stopWords.join('|')})\\b`, 'gi');
+
+    return text
+        .toLowerCase()
+        .replace(/[^\w\s-]/g, '')           // Remove special chars except hyphen
+        .replace(/-/g, ' ')                  // Replace hyphens with spaces
+        .replace(stopWordPattern, '')        // Remove stop words
+        .replace(/\s+/g, ' ')               // Normalize whitespace
+        .trim();
+};
+
 /**
  * AI-powered university name normalization
- * Takes user input and returns structured JSON with normalized university data
- * This ensures "Al Akhawayn" and "AUI" and "al-akhawayn university" all match the same university
+ * Only called when deterministic matching fails and input is ambiguous
  */
-export const normalizeUniversityInput = async (userInput) => {
-    const ai = getGenAI();
-    if (!ai) {
-        // Fallback to basic normalization
+export const normalizeUniversityInput = async (userInput, skipAI = false) => {
+    const inputName = typeof userInput === 'string' ? userInput : (userInput.name || userInput);
+    const deterministicNorm = basicNormalize(inputName);
+
+    // If skipAI is true or input is not ambiguous, return deterministic result
+    if (skipAI || !isAmbiguousInput(userInput)) {
+        console.log('[Gemini] Skipping AI normalization - input is not ambiguous:', inputName);
         return {
-            normalizedName: basicNormalize(userInput.name || userInput),
-            name: userInput.name || userInput,
+            normalizedName: deterministicNorm,
+            name: inputName,
             location: userInput.location || null,
             country: userInput.country || null,
             description: userInput.description || null,
+            usedAI: false,
+        };
+    }
+
+    const ai = getGenAI();
+    if (!ai) {
+        console.warn('[Gemini] No API key - falling back to deterministic normalization');
+        return {
+            normalizedName: deterministicNorm,
+            name: inputName,
+            location: userInput.location || null,
+            country: userInput.country || null,
+            description: userInput.description || null,
+            usedAI: false,
         };
     }
 
     try {
-        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        console.log('[Gemini] Using AI normalization for ambiguous input:', inputName);
 
-        const prompt = `You are a university data normalizer. Given user input about a university, extract and normalize the information.
+        const model = ai.getGenerativeModel({
+            model: 'gemini-2.0-flash',
+            generationConfig: {
+                maxOutputTokens: CONFIG.NORMALIZE_MAX_TOKENS,
+            }
+        });
 
-USER INPUT:
-${typeof userInput === 'string' ? userInput : JSON.stringify(userInput)}
+        const prompt = `Normalize this university name. Return ONLY JSON.
 
-TASK:
-1. Extract the university name, location (city), and country
-2. Create a "normalizedName" - a canonical, lowercase, simplified version of the university name that can be used for matching
-3. The normalizedName should:
-   - Be lowercase
-   - Remove common words like "university", "college", "of", "the", "institute"
-   - Keep the most distinctive part of the name
-   - Handle abbreviations (e.g., "MIT" → "massachusetts institute technology", "AUI" → "al akhawayn")
+INPUT: "${typeof userInput === 'string' ? userInput : JSON.stringify(userInput)}"
 
-IMPORTANT: Common university name variations should normalize to the same value:
-- "Al Akhawayn University", "AUI", "al-akhawayn" → normalizedName: "al akhawayn"
-- "MIT", "Massachusetts Institute of Technology" → normalizedName: "massachusetts institute technology"
-- "University of Nairobi", "UoN", "Nairobi University" → normalizedName: "nairobi"
+Rules:
+- normalizedName: lowercase, remove "university/college/institute/of/the", keep distinctive parts
+- Handle acronyms: "MIT"→"massachusetts institute technology", "AUI"→"al akhawayn", "UoN"→"nairobi"
+- name: properly formatted display name
 
-Respond with ONLY valid JSON in this exact format:
-{
-  "normalizedName": "string (lowercase, simplified, for matching)",
-  "name": "string (properly formatted display name)",
-  "location": "string or null (city name)",
-  "country": "string or null (country name)",
-  "description": "string or null (if provided)"
-}`;
+JSON format: {"normalizedName":"","name":"","location":null,"country":null}`;
 
         const result = await model.generateContent(prompt);
         const response = await result.response;
         const responseText = response.text();
 
-        // Extract JSON from response
         const jsonMatch = responseText.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]);
             return {
-                normalizedName: parsed.normalizedName || basicNormalize(parsed.name),
-                name: parsed.name,
-                location: parsed.location,
-                country: parsed.country,
-                description: parsed.description,
+                normalizedName: parsed.normalizedName || deterministicNorm,
+                name: parsed.name || inputName,
+                location: parsed.location || userInput.location || null,
+                country: parsed.country || userInput.country || null,
+                description: parsed.description || userInput.description || null,
+                usedAI: true,
             };
         }
 
         throw new Error('No valid JSON in response');
     } catch (error) {
-        console.error('AI normalization error:', error);
-        // Fallback to basic normalization
+        console.error('[Gemini] AI normalization error:', error.message);
         return {
-            normalizedName: basicNormalize(userInput.name || userInput),
-            name: userInput.name || userInput,
+            normalizedName: deterministicNorm,
+            name: inputName,
             location: userInput.location || null,
             country: userInput.country || null,
             description: userInput.description || null,
+            usedAI: false,
         };
     }
-};
-
-/**
- * Basic text normalization (fallback when AI is unavailable)
- */
-export const basicNormalize = (text) => {
-    if (!text) return '';
-    return text
-        .toLowerCase()
-        .replace(/[^\w\s]/g, '') // Remove special characters
-        .replace(/\b(university|college|institute|of|the|in|at)\b/g, '') // Remove common words
-        .replace(/\s+/g, ' ') // Normalize whitespace
-        .trim();
 };
 
 /**
@@ -112,19 +178,21 @@ export const basicNormalize = (text) => {
 export const moderateContent = async (text) => {
     const ai = getGenAI();
     if (!ai) {
-        console.warn('No API Key provided, skipping moderation.');
+        console.warn('[Gemini] No API Key provided, skipping moderation.');
         return { safe: true };
     }
 
     try {
-        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const model = ai.getGenerativeModel({
+            model: 'gemini-2.0-flash',
+            generationConfig: {
+                maxOutputTokens: 50,
+            }
+        });
 
-        const prompt = `You are a content moderator for a university feedback platform.
-Analyze the following text for: Hate speech, Severe Profanity, PII (Personal Identifiable Information like full names), or Threatening language.
-
+        const prompt = `Moderate this text for: Hate speech, Severe Profanity, PII, Threats.
 Text: "${text}"
-
-Respond with JSON only: { "safe": boolean, "reason": "string (optional, only if not safe)" }`;
+JSON only: {"safe":boolean,"reason":"optional"}`;
 
         const result = await model.generateContent(prompt);
         const response = await result.response;
@@ -136,136 +204,144 @@ Respond with JSON only: { "safe": boolean, "reason": "string (optional, only if 
         }
         return { safe: true };
     } catch (error) {
-        console.error('Moderation error:', error);
+        console.error('[Gemini] Moderation error:', error.message);
         return { safe: true };
     }
 };
 
 /**
- * Generate AI insights for a specific university (RAG approach)
+ * Generate AI insights for a specific university (Summary-Driven RAG)
+ * Uses precomputed sentiment summary instead of raw reviews
  */
-export const generateInsight = async (query, universityName, stats, reviews) => {
+export const generateInsight = async (query, universityName, stats, sentimentSummary = null) => {
     const ai = getGenAI();
     if (!ai) {
         return 'API Key missing. Cannot generate insight.';
     }
 
     try {
-        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const model = ai.getGenerativeModel({
+            model: 'gemini-2.0-flash',
+            generationConfig: {
+                maxOutputTokens: CONFIG.INSIGHT_MAX_TOKENS,
+            }
+        });
 
-        const statsSummary = `
-University: ${universityName}
-Total Reviews: ${stats.totalReviews || stats.total_reviews || 0}
-Overall Rating: ${stats.averageRating || stats.average_rating || 0}/5
-Category Breakdown:
-${formatCategoryBreakdown(stats)}
-`;
+        // Build compact context from stats
+        const totalReviews = stats.totalReviews || stats.total_reviews || 0;
+        const avgRating = stats.averageRating || stats.average_rating || 0;
 
-        const qualitativeSamples = reviews
-            .slice(0, 20)
-            .map((r) => `[${r.category} - ${r.rating}/5]: ${r.comment}`)
-            .join('\n');
+        // Format category averages compactly
+        const categoryStr = formatCategoryBreakdownCompact(stats);
 
-        const prompt = `You are a friendly student advisor who has talked to many students at ${universityName}. You speak casually like texting a friend.
+        // Use sentiment summary if available
+        const sentimentStr = sentimentSummary
+            ? `Tone: ${sentimentSummary.tone}. Good: ${sentimentSummary.positivePhrases || 'N/A'}. Bad: ${sentimentSummary.negativePhrases || 'N/A'}`
+            : 'No sentiment data yet.';
 
-STYLE GUIDE:
-- Sound like a real person, not a robot or database
-- Use phrases like: "A lot of students say...", "From what I've heard...", "Most people think...", "The general vibe is..."
-- NEVER say "based on the data", "in our database", "according to reviews", or similar technical phrases
-- Be casual and friendly ("tbh", "ngl", "pretty much")
-- Use emojis sparingly but naturally 🎓
-- If info is limited, say "I haven't heard much about that" not "we don't have data"
-- Keep it concise and conversational
-- Keep your responses SHORT (2-4 sentences max)
-- NEVER use markdown formatting like **bold**, *italic*, bullet points, or numbered lists - write in plain conversational text only
-- Answer the question directly without listing everything you know
+        const prompt = `You're a friendly student advisor at ${universityName}. Answer briefly like texting a friend.
 
-WHAT STUDENTS HAVE SHARED:
-${statsSummary}
+Stats: ${totalReviews} reviews, ${avgRating}/5 avg. ${categoryStr}
+Vibe: ${sentimentStr}
 
-ACTUAL STUDENT QUOTES:
-${qualitativeSamples}
+Q: "${query}"
 
-QUESTION:
-"${query}"
-
-Respond like you're a helpful friend who knows the campus well. Keep it brief and focused:`;
+Reply in 2-3 sentences, casual tone, no markdown/bullets, use emojis sparingly 🎓`;
 
         const result = await model.generateContent(prompt);
         const response = await result.response;
         return response.text() || "I couldn't generate an insight at this moment.";
     } catch (error) {
-        console.error('Gemini generation error:', error);
-        return "Sorry, I'm having trouble analyzing the data right now. Please try again later.";
+        console.error('[Gemini] Generation error:', error.message);
+        return "Sorry, I'm having trouble right now. Try again later.";
     }
 };
 
 /**
- * Global AI Chat - can answer questions about all universities
- * Used when no specific university is selected
+ * Global AI Chat - Selective & Summary-Based (RAG)
+ * Only receives pre-ranked top candidates with summaries
  */
-export const generateGlobalInsight = async (query, allUniversities, allReviews) => {
+export const generateGlobalInsight = async (query, rankedCandidates) => {
     const ai = getGenAI();
     if (!ai) {
         return 'API Key missing. Cannot generate insight.';
     }
 
     try {
-        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const model = ai.getGenerativeModel({
+            model: 'gemini-2.0-flash',
+            generationConfig: {
+                maxOutputTokens: CONFIG.GLOBAL_INSIGHT_MAX_TOKENS,
+            }
+        });
 
-        // Build context from all universities
-        const universityContext = allUniversities
-            .slice(0, 20)
-            .map((u) => `- ${u.name} (${u.location}, ${u.country}): ${u.avgRating}/5 rating, ${u.reviewCount} reviews`)
+        // Build compact university context from pre-ranked candidates (max 5)
+        const universityContext = rankedCandidates
+            .slice(0, 5)
+            .map(u => {
+                const summary = u.sentimentSummary;
+                const tone = summary?.tone || 'unknown';
+                return `${u.name} (${u.location}, ${u.country}): ${u.avgRating}/5, ${u.reviewCount} reviews, ${tone} vibe`;
+            })
             .join('\n');
 
-        // Sample reviews from across universities
-        const reviewSamples = allReviews
-            .slice(0, 30)
-            .map((r) => `[${r.universityName || 'University'} - ${r.category} - ${r.rating}/5]: ${r.comment}`)
-            .join('\n');
+        const prompt = `You're a friendly advisor who knows these schools. Help find the right one.
 
-        const prompt = `You're a friendly advisor who has talked to students from universities across Africa, Central Asia, and developing regions. You help students find the right school.
-
-STYLE GUIDE:
-- Sound like a real person who has visited these campuses and talked to students
-- Use phrases like: "Students at [school] tend to say...", "A lot of people feel that...", "From what I've heard...", "The word on the street is..."
-- NEVER use technical phrases like "based on data", "in our database", "according to our records"
-- Be casual and warm ("honestly", "tbh", "from what I gather")
-- Use emojis naturally 🌍🎓
-- If you haven't heard about something, just DON'T MENTION IT AT ALL - skip schools you don't have info on
-- Compare schools by what students actually feel, not by numbers
-- Answer the user in the same language they ask in
-
-CRITICAL RULES:
-- When asked for recommendations, give ONLY 2-3 of the BEST options you actually have info about
-- DO NOT list all universities - be selective and focused
-- NEVER mention a school just to say you don't have info on it - that's annoying and unhelpful
-- Keep responses SHORT (3-5 sentences max)
-- NEVER use markdown formatting like **bold**, *italic*, bullet points (-), or numbered lists (1. 2. 3.) - write in plain conversational text only
-- Answer directly without trying to be exhaustive
-
-SCHOOLS I KNOW ABOUT:
+Schools:
 ${universityContext}
 
-WHAT STUDENTS HAVE TOLD ME:
-${reviewSamples}
+Q: "${query}"
 
-QUESTION:
-"${query}"
-
-Answer like a helpful friend who knows these schools. Be brief, focused, and only mention schools you actually have good info on:`;
+Reply in 3-4 sentences, compare only 2-3 best options, casual tone, no markdown/bullets 🌍`;
 
         const result = await model.generateContent(prompt);
         const response = await result.response;
         return response.text() || "I couldn't generate an insight at this moment.";
     } catch (error) {
-        console.error('Gemini global chat error:', error);
-        return "Sorry, I'm having trouble analyzing the data right now. Please try again later.";
+        console.error('[Gemini] Global chat error:', error.message);
+        return "Sorry, I'm having trouble right now. Try again later.";
     }
 };
 
-// Helper to format category breakdown for the prompt
+// ============================================
+// HELPERS
+// ============================================
+
+/**
+ * Format category breakdown compactly for prompts
+ */
+function formatCategoryBreakdownCompact(stats) {
+    const parts = [];
+
+    if (stats.categoryBreakdown) {
+        for (const [cat, data] of Object.entries(stats.categoryBreakdown)) {
+            if (data.count > 0) {
+                parts.push(`${cat.split(' ')[0]}:${data.average}`);
+            }
+        }
+    } else {
+        // Handle database format
+        const cats = [
+            { key: 'academics', label: 'Acad' },
+            { key: 'dorms', label: 'Dorms' },
+            { key: 'food', label: 'Food' },
+            { key: 'social', label: 'Social' },
+            { key: 'admin', label: 'Admin' },
+            { key: 'cost', label: 'Cost' },
+            { key: 'safety', label: 'Safety' },
+            { key: 'career', label: 'Career' },
+        ];
+        for (const c of cats) {
+            if (stats[`${c.key}_count`] > 0) {
+                parts.push(`${c.label}:${stats[`${c.key}_avg`]}`);
+            }
+        }
+    }
+
+    return parts.length > 0 ? parts.join(', ') : 'No category data';
+}
+
+// Helper to format category breakdown for the prompt (legacy, kept for compatibility)
 function formatCategoryBreakdown(stats) {
     const categories = [
         { key: 'academics', label: 'Academics' },
@@ -278,7 +354,6 @@ function formatCategoryBreakdown(stats) {
         { key: 'career', label: 'Career Support' },
     ];
 
-    // Handle both database format and in-memory format
     if (stats.categoryBreakdown) {
         return Object.entries(stats.categoryBreakdown)
             .filter(([_, data]) => data.count > 0)
