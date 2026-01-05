@@ -221,7 +221,7 @@ export const generateInsight = async (query, universityName, stats, sentimentSum
 
     try {
         const model = ai.getGenerativeModel({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-flash',
             generationConfig: {
                 maxOutputTokens: 1024,
             }
@@ -270,7 +270,7 @@ export const generateGlobalInsight = async (query, rankedCandidates) => {
 
     try {
         const model = ai.getGenerativeModel({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-flash',
             generationConfig: {
                 maxOutputTokens: 2048, // High limit to allow complete responses
             }
