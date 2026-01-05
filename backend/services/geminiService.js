@@ -30,6 +30,7 @@ const getGenAI = () => {
     return genAI;
 };
 
+
 // ============================================
 // INPUT ANALYSIS UTILITIES
 // ============================================
@@ -220,12 +221,14 @@ export const generateInsight = async (query, universityName, stats, sentimentSum
     }
 
     try {
-        const model = ai.getGenerativeModel({
-            model: 'gemini-3-flash',
-            generationConfig: {
-                maxOutputTokens: 1024,
-            }
-        });
+
+        const model = ai.getGenerativeModel(
+            {
+                model: 'gemini-3-flash-preview',
+                generationConfig: { maxOutputTokens: 1024 }
+            },
+            { apiVersion: 'v1alpha' }
+        );
 
         // Build compact context from stats
         const totalReviews = stats.totalReviews || stats.total_reviews || 0;
@@ -269,12 +272,14 @@ export const generateGlobalInsight = async (query, rankedCandidates) => {
     }
 
     try {
-        const model = ai.getGenerativeModel({
-            model: 'gemini-3-flash',
-            generationConfig: {
-                maxOutputTokens: 2048, // High limit to allow complete responses
-            }
-        });
+        // FIXED: Exact model name + apiVersion as 2nd argument
+        const model = ai.getGenerativeModel(
+            {
+                model: 'gemini-3-flash-preview',
+                generationConfig: { maxOutputTokens: 2048 }
+            },
+            { apiVersion: 'v1alpha' }
+        );
 
         // Build compact university context from pre-ranked candidates (max 5)
         const universityContext = rankedCandidates
